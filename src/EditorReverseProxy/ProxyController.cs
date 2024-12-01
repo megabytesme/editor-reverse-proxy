@@ -19,6 +19,19 @@ public class ProxyController : ControllerBase
         return Ok();
     }
 
+    [HttpDelete("deregister/{service}")]
+    public IActionResult Deregister(string service)
+    {
+        if (_services.TryRemove(service, out _))
+        {
+            return Ok();
+        }
+        else
+        {
+            return NotFound();
+        }
+    }
+
     [HttpGet("services")]
     public IActionResult GetServices()
     {
