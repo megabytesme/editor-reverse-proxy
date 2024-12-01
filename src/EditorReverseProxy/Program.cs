@@ -38,10 +38,11 @@ public class Program
                         endpoints.MapFallback(async context =>
                         {
                             var path = context.Request.Path.ToString().TrimStart('/');
+                            var queryString = context.Request.QueryString.ToString();
                             var service = path.Split('/')[0];
                             if (services.TryGetValue(service, out var targetUrl))
                             {
-                                var requestPath = path.Substring(service.Length);
+                                var requestPath = path.Substring(service.Length) + queryString;
                                 var requestUri = new Uri(new Uri(targetUrl), requestPath);
                                 var client = httpClientFactory.CreateClient();
 
@@ -65,6 +66,7 @@ public class Program
                                 requestMessage.Method = new HttpMethod(requestMethod);
                                 var responseMessage = await client.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
 
+                                context.Response.StatusCode = (int)responseMessage.StatusCode;
                                 foreach (var header in responseMessage.Headers)
                                 {
                                     context.Response.Headers[header.Key] = header.Value.ToArray();
@@ -75,7 +77,7 @@ public class Program
                                     context.Response.Headers[header.Key] = header.Value.ToArray();
                                 }
 
-                                context.Response.StatusCode = (int)responseMessage.StatusCode;
+                                context.Response.ContentType = responseMessage.Content.Headers.ContentType?.ToString();
                                 await responseMessage.Content.CopyToAsync(context.Response.Body);
                             }
                             else
