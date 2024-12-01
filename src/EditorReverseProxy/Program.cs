@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 public class Program
 {
@@ -20,10 +22,12 @@ public class Program
                 {
                     services.AddControllers();
                     services.AddSingleton(new ConcurrentDictionary<string, string>());
+                    services.AddHttpClient();
                 });
                 webBuilder.Configure(app =>
                 {
                     var services = app.ApplicationServices.GetRequiredService<ConcurrentDictionary<string, string>>();
+                    var httpClientFactory = app.ApplicationServices.GetRequiredService<IHttpClientFactory>();
 
                     app.UseRouting();
 
@@ -38,10 +42,41 @@ public class Program
                             if (services.TryGetValue(service, out var targetUrl))
                             {
                                 var requestPath = path.Substring(service.Length);
-                                context.Request.Path = new PathString(requestPath);
-                                context.Request.Scheme = "http";
-                                context.Request.Host = new HostString(targetUrl);
-                                await context.Response.WriteAsync(targetUrl);
+                                var requestUri = new Uri(new Uri(targetUrl), requestPath);
+                                var client = httpClientFactory.CreateClient();
+
+                                var requestMessage = new HttpRequestMessage();
+                                var requestMethod = context.Request.Method;
+                                if (!HttpMethods.IsGet(requestMethod) &&
+                                    !HttpMethods.IsHead(requestMethod) &&
+                                    !HttpMethods.IsDelete(requestMethod) &&
+                                    !HttpMethods.IsTrace(requestMethod))
+                                {
+                                    var streamContent = new StreamContent(context.Request.Body);
+                                    requestMessage.Content = streamContent;
+                                }
+
+                                foreach (var header in context.Request.Headers)
+                                {
+                                    requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+                                }
+
+                                requestMessage.RequestUri = requestUri;
+                                requestMessage.Method = new HttpMethod(requestMethod);
+                                var responseMessage = await client.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+
+                                foreach (var header in responseMessage.Headers)
+                                {
+                                    context.Response.Headers[header.Key] = header.Value.ToArray();
+                                }
+
+                                foreach (var header in responseMessage.Content.Headers)
+                                {
+                                    context.Response.Headers[header.Key] = header.Value.ToArray();
+                                }
+
+                                context.Response.StatusCode = (int)responseMessage.StatusCode;
+                                await responseMessage.Content.CopyToAsync(context.Response.Body);
                             }
                             else
                             {
